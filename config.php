@@ -1,9 +1,9 @@
 <?php
 // Database configuration
 define('DB_HOST', 'fdb1028.awardspace.net');
-define('DB_USERNAME', '4561858_webrover');
-define('DB_PASSWORD', '%,rJ+aX,9lmC@u/U');
-define('DB_NAME', '4561858_webrover');
+define('DB_USERNAME', '4561858_aquafarm');
+define('DB_PASSWORD', '@hridi2010');
+define('DB_NAME', '4561858_aquafarm');
 
 // Function to connect to the database
 function connectDB() {
