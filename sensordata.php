@@ -1,86 +1,115 @@
 <?php
 include_once('config.php');
-
 header('Content-Type: application/json');
 
 $correct_api_key = "iloveher143";
 
-// --- Validate required fields ---
 $required = ['api_key', 'station_id', 'ph', 'temp', 'level'];
-foreach ($required as $field) {
-    if (!isset($_POST[$field])) {
-        echo json_encode(['status' => 'error', 'message' => "Missing field: $field"]);
+foreach ($required as $f) {
+    if (!isset($_POST[$f])) {
+        echo json_encode(['status'=>'error',"message"=>"Missing $f"]);
         exit;
     }
 }
 
-$api_key    = $_POST['api_key'];
-$station_id = intval($_POST['station_id']);
-$ph         = floatval($_POST['ph']);
-$temp       = floatval($_POST['temp']);
-$level      = floatval($_POST['level']);
-$extra      = isset($_POST['extra']) ? $_POST['extra'] : null; // optional JSON string
-
-// Validate the extra field is valid JSON if provided
-if ($extra !== null) {
-    json_decode($extra);
-    if (json_last_error() !== JSON_ERROR_NONE) {
-        echo json_encode(['status' => 'error', 'message' => 'Invalid JSON in extra field']);
-        exit;
-    }
-}
-
-if ($api_key !== $correct_api_key) {
-    echo json_encode(['status' => 'error', 'message' => 'Invalid API key']);
+if ($_POST['api_key'] !== $correct_api_key) {
+    echo json_encode(['status'=>'error','message'=>'Invalid API key']);
     exit;
 }
 
 $db = connectDB();
 
-// --- Insert sensor reading ---
+$station_id = intval($_POST['station_id']);
+$ph = floatval($_POST['ph']);
+$temp = floatval($_POST['temp']);
+$level = floatval($_POST['level']);
+$extra = $_POST['extra'] ?? null;
+
+/* ---------- INSERT SENSOR DATA ---------- */
 $stmt = $db->prepare("
     INSERT INTO sensor_data (station_id, ph, temp, level, extra, recorded_at)
     VALUES (?, ?, ?, ?, ?, NOW())
 ");
 $stmt->bind_param("iddds", $station_id, $ph, $temp, $level, $extra);
-
-if (!$stmt->execute()) {
-    echo json_encode(['status' => 'error', 'message' => 'Insert failed: ' . $stmt->error]);
-    $stmt->close();
-    $db->close();
-    exit;
-}
+$stmt->execute();
+$insert_id = $db->insert_id;
 $stmt->close();
 
-// --- Fetch current setpoints for this station ---
-// If no setpoint row exists yet, create a default one
-$sp_stmt = $db->prepare("
-    INSERT INTO station_setpoints (station_id, a_ph, a_temp, a_level)
-    VALUES (?, 7.00, 28.00, 80.00)
-    ON DUPLICATE KEY UPDATE station_id = station_id
-");
-$sp_stmt->bind_param("i", $station_id);
-$sp_stmt->execute();
-$sp_stmt->close();
+/* ---------- LOAD SETPOINT SOURCE ---------- */
+$manual = null;
 
-$get_stmt = $db->prepare("
-    SELECT a_ph, a_temp, a_level, a_extra
+$man = $db->prepare("
+    SELECT a_ph, a_temp, a_level, source
     FROM station_setpoints
     WHERE station_id = ?
 ");
-$get_stmt->bind_param("i", $station_id);
-$get_stmt->execute();
-$result = $get_stmt->get_result();
-$setpoints = $result->fetch_assoc();
-$get_stmt->close();
-$db->close();
+$man->bind_param("i", $station_id);
+$man->execute();
+$manual = $man->get_result()->fetch_assoc();
+$man->close();
 
-// --- Return setpoints to ESP32 ---
+/* ---------- DEFAULT MIDPOINTS ---------- */
+$ph_min = 7.0; $ph_max = 8.0;
+$temp_min = 25.0; $temp_max = 30.0;
+$level_min = 60.0; $level_max = 90.0;
+
+/* ---------- APPLY MANUAL OVERRIDE ---------- */
+if ($manual && $manual['source'] === 'manual') {
+    $ph_mid    = floatval($manual['a_ph']);
+    $temp_mid  = floatval($manual['a_temp']);
+    $level_mid = floatval($manual['a_level']);
+} else {
+
+    /* ---------- PULL PRESETS ---------- */
+    $pr = $db->prepare("
+        SELECT fp.ph_min, fp.ph_max, fp.temp_min, fp.temp_max, fp.level_min, fp.level_max
+        FROM fish_presets fp
+        INNER JOIN station_presets sp ON fp.id = sp.preset_id
+        WHERE sp.station_id = ?
+    ");
+    $pr->bind_param("i", $station_id);
+    $pr->execute();
+    $presets = $pr->get_result()->fetch_all(MYSQLI_ASSOC);
+    $pr->close();
+
+    if (!empty($presets)) {
+        $ph_min = $ph_max = $temp_min = $temp_max = $level_min = $level_max = 0;
+
+        foreach ($presets as $p) {
+            $ph_min += $p['ph_min'];
+            $ph_max += $p['ph_max'];
+            $temp_min += $p['temp_min'];
+            $temp_max += $p['temp_max'];
+            $level_min += $p['level_min'];
+            $level_max += $p['level_max'];
+        }
+
+        $count = count($presets);
+
+        $ph_mid    = ($ph_min / $count + $ph_max / $count) / 2;
+        $temp_mid  = ($temp_min / $count + $temp_max / $count) / 2;
+        $level_mid = ($level_min / $count + $level_max / $count) / 2;
+
+    } else {
+        $ph_mid = ($ph_min + $ph_max) / 2;
+        $temp_mid = ($temp_min + $temp_max) / 2;
+        $level_mid = ($level_min + $level_max) / 2;
+    }
+}
+
+/* ---------- ENSURE SETPOINT ROW EXISTS ---------- */
+$db->query("
+    INSERT INTO station_setpoints (station_id, a_ph, a_temp, a_level, source)
+    VALUES ($station_id, 7, 28, 80, 'preset')
+    ON DUPLICATE KEY UPDATE station_id=station_id
+");
+
+/* ---------- RESPONSE TO ESP ---------- */
 echo json_encode([
     'status'  => 'ok',
-    'a_ph'    => floatval($setpoints['a_ph']),
-    'a_temp'  => floatval($setpoints['a_temp']),
-    'a_level' => floatval($setpoints['a_level']),
-    'a_extra' => $setpoints['a_extra'] ? json_decode($setpoints['a_extra'], true) : null
+    'a_ph'    => number_format($ph_mid, 2, '.', ''),
+    'a_temp'  => number_format($temp_mid, 2, '.', ''),
+    'a_level' => number_format($level_mid, 2, '.', '')
 ]);
-?>
+
+$db->close();
