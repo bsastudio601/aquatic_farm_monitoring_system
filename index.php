@@ -1,141 +1,756 @@
 <?php
 require 'config.php';
-
 $db = connectDB();
-
-// Fetch all known stations
 $stations_result = $db->query("SELECT DISTINCT station_id FROM sensor_data ORDER BY station_id");
 $stations = [];
-while ($row = $stations_result->fetch_assoc()) {
-    $stations[] = $row['station_id'];
-}
-
-$station_id = isset($_GET['station_id']) ? intval($_GET['station_id']) : ($stations[0] ?? 1);
+while ($row = $stations_result->fetch_assoc()) $stations[] = $row['station_id'];
+$all_presets = $db->query("SELECT * FROM fish_presets ORDER BY name")->fetch_all(MYSQLI_ASSOC);
 $db->close();
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fish Farm Monitor</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fish Farm Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0a0a; --panel:#111; --border:#c8a84b; --border-dim:#3a2e10;
+  --text:#e8e0cc; --text-dim:#7a7060;
+  --ok:#2d6a2d; --ok-t:#7dda7d; --alert:#6a1f1f; --alert-t:#ff6b6b;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;height:100vh;display:flex;overflow:hidden;}
+
+/* ── Sidebar ── */
+#sidebar{width:180px;min-width:180px;background:var(--panel);border-right:1px solid var(--border-dim);display:flex;flex-direction:column;padding:24px 16px;gap:12px;}
+.sidebar-logo{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--border);letter-spacing:3px;padding-bottom:20px;border-bottom:1px solid var(--border-dim);margin-bottom:8px;line-height:1.6;}
+.nav-btn{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:2px;padding:12px 16px;cursor:pointer;text-align:left;transition:all .2s;text-transform:uppercase;}
+.nav-btn:hover,.nav-btn.active{border-color:var(--border);color:var(--border);background:rgba(200,168,75,.05);box-shadow:0 0 14px rgba(200,168,75,.3),0 0 4px rgba(200,168,75,.1);}
+
+/* ── Pages ── */
+#main{flex:1;overflow:hidden;display:flex;flex-direction:column;}
+.page{display:none;width:100%;height:100%;}
+.page.active{display:flex;flex-direction:column;}
+#farms-page,#history-page,#preset-page{padding:28px;gap:16px;overflow-y:auto;}
+.page-title{font-family:'Orbitron',sans-serif;font-size:.65rem;letter-spacing:4px;color:var(--border);text-transform:uppercase;padding-bottom:16px;border-bottom:1px solid var(--border-dim);}
+
+/* ── Station cards ── */
+#cards-container{display:flex;flex-wrap:wrap;gap:20px;padding-top:8px;}
+.station-card{
+  width:220px;background:var(--panel);
+  border:1px solid var(--border-dim);
+  padding:18px 14px 14px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  transition:border-color .25s, box-shadow .25s;
+}
+/* default hover — gold glow */
+.station-card:hover{
+  border-color:var(--border);
+  box-shadow:0 0 22px rgba(200,168,75,.25), 0 0 6px rgba(200,168,75,.1);
+}
+/* status-driven glow — set via JS class */
+.station-card.glow-ok{
+  border-color:#3a7a3a;
+  box-shadow:0 0 20px rgba(60,180,60,.2);
+}
+.station-card.glow-ok:hover{
+  border-color:var(--ok-t);
+  box-shadow:0 0 28px rgba(60,220,60,.3);
+}
+.station-card.glow-alert{
+  border-color:#7a2020;
+  box-shadow:0 0 20px rgba(200,40,40,.2);
+}
+.station-card.glow-alert:hover{
+  border-color:var(--alert-t);
+  box-shadow:0 0 28px rgba(255,80,80,.35);
+}
+.card-title{font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:2px;}
+.donut-wrap{position:relative;width:120px;height:120px;}
+.donut-wrap canvas{position:absolute;top:0;left:0;}
+.card-readings{width:100%;border:1px solid var(--border-dim);padding:10px 12px;font-size:.8rem;line-height:2;}
+.card-target{width:100%;padding:5px 10px;font-size:.68rem;color:var(--text-dim);border:1px solid var(--border-dim);line-height:1.7;}
+.card-status{width:100%;padding:6px 10px;font-size:.7rem;letter-spacing:1px;}
+.card-status.ok{background:var(--ok);color:var(--ok-t);}
+.card-status.alert{background:var(--alert);color:var(--alert-t);}
+.card-status.pending{background:#1a1a1a;color:var(--text-dim);}
+
+/* ── Buttons ── */
+.btn-gold{background:transparent;border:1px solid var(--border);color:var(--border);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;transition:all .2s;}
+.btn-gold:hover{background:rgba(200,168,75,.1);box-shadow:0 0 10px rgba(200,168,75,.15);}
+.btn-dim{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;transition:all .2s;}
+.btn-dim:hover{border-color:#666;color:#999;}
+.btn-red{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px 14px;cursor:pointer;transition:all .2s;}
+.btn-red:hover{border-color:#aa3333;color:#cc4444;background:rgba(160,40,40,.08);}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+
+/* ── Modal ── */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;align-items:center;justify-content:center;}
+#modal-overlay.open{display:flex;}
+#modal{background:var(--panel);border:1px solid var(--border);width:680px;max-width:96vw;max-height:92vh;overflow-y:auto;padding:28px;display:flex;flex-direction:column;gap:20px;}
+.modal-header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-dim);padding-bottom:14px;gap:10px;}
+.modal-header h2{font-family:'Orbitron',sans-serif;font-size:.9rem;letter-spacing:3px;color:var(--border);flex:1;}
+.modal-header-btns{display:flex;gap:8px;}
+
+.modal-readings{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+.reading-box{border:1px solid var(--border-dim);padding:14px;display:flex;flex-direction:column;gap:4px;transition:box-shadow .2s;}
+.reading-box:hover{border-color:var(--border-dim);box-shadow:0 0 14px rgba(200,168,75,.2);}
+.reading-label{font-size:.65rem;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase;}
+.reading-value{font-family:'Orbitron',sans-serif;font-size:1.4rem;}
+.reading-range{font-size:.7rem;color:var(--text-dim);}
+
+.section-title{font-family:'Orbitron',sans-serif;font-size:.65rem;letter-spacing:3px;color:var(--border);text-transform:uppercase;margin-bottom:10px;}
+
+/* ── Preset chips ── */
+.preset-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;min-height:28px;}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);font-size:.72rem;color:var(--border);transition:box-shadow .2s;cursor:default;}
+.chip:hover{box-shadow:0 0 8px rgba(200,168,75,.2);}
+.chip-x{background:none;border:none;color:var(--border);cursor:pointer;font-size:1rem;line-height:1;padding:0 2px;opacity:.6;transition:all .15s;}
+.chip-x:hover{opacity:1;color:var(--alert-t);text-shadow:0 0 6px rgba(255,80,80,.5);}
+
+/* ── Preset picker ── */
+#preset-picker{display:none;border:1px solid var(--border-dim);padding:16px;margin-top:8px;}
+#preset-picker.open{display:block;}
+.picker-grid{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;}
+.picker-item{display:flex;align-items:center;gap:8px;border:1px solid var(--border-dim);padding:8px 12px;cursor:pointer;transition:border-color .2s;}
+.picker-item:hover{border-color:var(--border);box-shadow:0 0 12px rgba(200,168,75,.3);}
+.picker-item input{accent-color:var(--border);}
+.picker-item label{font-size:.78rem;cursor:pointer;}
+
+/* ── Override section (collapsed by default) ── */
+.override-toggle{background:none;border:none;color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;cursor:pointer;padding:0;text-transform:uppercase;display:flex;align-items:center;gap:6px;transition:color .2s;}
+.override-toggle:hover{color:var(--border);text-shadow:0 0 8px rgba(200,168,75,.3);}
+.override-toggle .arrow{display:inline-block;transition:transform .2s;font-style:normal;}
+.override-toggle.open .arrow{transform:rotate(90deg);}
+#manual-body{display:none;margin-top:12px;}
+#manual-body.open{display:block;}
+.manual-hint{font-size:.7rem;color:var(--text-dim);margin-bottom:12px;padding:8px 10px;border-left:2px solid var(--border-dim);line-height:1.8;}
+.manual-hint b{color:var(--border);}
+.manual-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;}
+.manual-field label{font-size:.62rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;display:block;margin-bottom:4px;}
+.manual-field input{background:var(--bg);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.9rem;padding:7px 9px;outline:none;width:100%;}
+.manual-field input:focus{border-color:var(--border);}
+.modal-msg{font-size:.75rem;color:var(--ok-t);min-height:1em;margin-top:8px;}
+
+/* ── History page ── */
+.history-table{width:100%;border-collapse:collapse;font-size:.78rem;}
+.history-table th{font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;color:var(--border);border-bottom:1px solid var(--border-dim);padding:8px 10px;text-align:left;}
+.history-table td{padding:7px 10px;border-bottom:1px solid #1a1a1a;color:var(--text-dim);}
+.history-table tr:hover td{color:var(--text);background:rgba(255,255,255,.02);}
+.status-ok{color:var(--ok-t)!important;}
+.status-alert{color:var(--alert-t)!important;}
+#history-station-select{background:var(--panel);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;padding:8px 12px;font-size:.85rem;outline:none;}
+
+/* ── Preset library ── */
+.preset-lib-grid{display:flex;flex-wrap:wrap;gap:16px;padding-top:8px;}
+.preset-lib-card{width:220px;background:var(--panel);border:1px solid var(--border-dim);display:flex;flex-direction:column;transition:border-color .2s,box-shadow .2s;}
+.preset-lib-card:hover{border-color:var(--border);box-shadow:0 0 18px rgba(200,168,75,.15);}
+.preset-lib-card.new-card{border-style:dashed;cursor:pointer;align-items:center;justify-content:center;min-height:220px;color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:2px;}
+.preset-lib-card.new-card:hover{border-color:var(--border);color:var(--border);}
+.lib-card-img{width:100%;height:110px;object-fit:cover;display:block;}
+.lib-card-img-placeholder{width:100%;height:110px;display:flex;align-items:center;justify-content:center;color:var(--border-dim);font-size:.6rem;letter-spacing:1px;background:#0d0d0d;}
+.lib-card-body{padding:14px;display:flex;flex-direction:column;gap:8px;}
+.lib-card-name{font-family:'Orbitron',sans-serif;font-size:.75rem;letter-spacing:2px;color:var(--border);}
+.lib-card-range{font-size:.72rem;color:var(--text-dim);line-height:1.9;}
+.lib-card-del{background:transparent;border:1px solid #3a1a1a;color:#884444;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px;cursor:pointer;transition:all .2s;}
+.lib-card-del:hover{border-color:var(--alert-t);color:var(--alert-t);box-shadow:0 0 10px rgba(255,80,80,.2);}
+
+/* ── New preset form ── */
+#new-preset-form{display:none;background:var(--panel);border:1px solid var(--border);padding:22px;margin-bottom:8px;}
+#new-preset-form.open{display:block;}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0;}
+.form-field label{font-size:.62rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;display:block;margin-bottom:4px;}
+.form-field input{background:var(--bg);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.88rem;padding:7px 9px;outline:none;width:100%;}
+.form-field input:focus{border-color:var(--border);}
+.form-row{margin-bottom:10px;}
+.form-row label{font-size:.62rem;letter-spacing:1px;color:var(--text-dim);text-transform:uppercase;display:block;margin-bottom:4px;}
+.form-row input{width:100%;background:var(--bg);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;font-size:.88rem;padding:8px 10px;outline:none;}
+.form-row input:focus{border-color:var(--border);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border-dim);}
+/* ── Glow everywhere ── */
+input:focus, select:focus {
+  outline:none;
+  border-color:var(--border) !important;
+  box-shadow:0 0 12px rgba(200,168,75,.25);
+}
+select:hover {
+  border-color:#666;
+  box-shadow:0 0 8px rgba(200,168,75,.1);
+}
+.donut-wrap:hover canvas {
+  filter:drop-shadow(0 0 6px rgba(200,168,75,.3));
+}
+#modal {
+  box-shadow:0 0 40px rgba(200,168,75,.1);
+  transition:box-shadow .3s;
+}
+.card-readings:hover, .card-target:hover {
+  border-color:#555;
+  box-shadow:0 0 8px rgba(200,168,75,.08);
+}
+.history-table tr:hover td {
+  color:var(--text);
+  background:rgba(200,168,75,.04);
+  box-shadow:inset 0 0 20px rgba(200,168,75,.04);
+}
+.chip:hover {
+  box-shadow:0 0 10px rgba(200,168,75,.25);
+  border-color:var(--border);
+}
+.lib-card-del:hover {
+  border-color:var(--alert-t);
+  color:var(--alert-t);
+  box-shadow:0 0 12px rgba(255,80,80,.3);
+}
+.override-toggle:hover {
+  color:var(--border);
+  text-shadow:0 0 10px rgba(200,168,75,.5);
+}
+::-webkit-scrollbar-thumb:hover {
+  background:var(--border-dim);
+  box-shadow:0 0 6px rgba(200,168,75,.2);
+}
+.sidebar-logo {
+  text-shadow:0 0 12px rgba(200,168,75,.3);
+}
+.page-title {
+  text-shadow:0 0 16px rgba(200,168,75,.2);
+}
+.section-title {
+  text-shadow:0 0 10px rgba(200,168,75,.15);
+}
+.reading-value {
+  transition:text-shadow .2s;
+}
+.reading-box:hover .reading-value {
+  text-shadow:0 0 12px rgba(200,168,75,.3);
+}
+.card-title {
+  transition:text-shadow .2s;
+}
+.station-card:hover .card-title {
+  text-shadow:0 0 10px rgba(200,168,75,.4);
+}
+.lib-card-name {
+  transition:text-shadow .2s;
+}
+.preset-lib-card:hover .lib-card-name {
+  text-shadow:0 0 10px rgba(200,168,75,.4);
+}
+</style>
 </head>
 <body>
 
-<h1>Fish Farm Monitoring System</h1>
+<div id="sidebar">
+  <div class="sidebar-logo">Fish<br>Farm<br>Monitor</div>
+  <button class="nav-btn active" onclick="showPage('farms',this)">Farms</button>
+  <button class="nav-btn" onclick="showPage('history',this)">History</button>
+  <button class="nav-btn" onclick="showPage('preset',this)">Presets</button>
+</div>
 
-<!-- Station selector -->
-<label for="stationSelect">Station:</label>
-<select id="stationSelect">
-    <?php foreach ($stations as $sid): ?>
-        <option value="<?php echo $sid; ?>" <?php echo $sid == $station_id ? 'selected' : ''; ?>>
-            Station <?php echo $sid; ?>
-        </option>
-    <?php endforeach; ?>
-</select>
+<div id="main">
 
-<hr>
+  <!-- FARMS -->
+  <div class="page active" id="farms-page">
+    <div class="page-title">Live Station Overview</div>
+    <div id="cards-container">
+      <?php foreach ($stations as $sid): ?>
+        <div class="station-card" id="card-<?php echo $sid;?>" onclick="openModal(<?php echo $sid;?>)">
+          <div class="card-title">Station <?php echo $sid;?></div>
+          <div class="donut-wrap"><canvas id="donut-<?php echo $sid;?>" width="120" height="120"></canvas></div>
+          <div class="card-readings" id="readings-<?php echo $sid;?>">pH &nbsp;: --<br>Temp : -- °C<br>Level: -- %</div>
+          <div class="card-target" id="target-<?php echo $sid;?>">loading…</div>
+          <div class="card-status pending" id="status-<?php echo $sid;?>">-- --</div>
+        </div>
+      <?php endforeach;?>
+    </div>
+  </div>
 
-<!-- Latest readings -->
-<h2>Latest Reading</h2>
-<p>pH: <strong id="val_ph">--</strong></p>
-<p>Temp: <strong id="val_temp">--</strong> °C</p>
-<p>Level: <strong id="val_level">--</strong> %</p>
-<p>Status: <strong id="val_status">--</strong></p>
-<p>Recorded: <span id="val_time">--</span></p>
+  <!-- HISTORY -->
+  <div class="page" id="history-page">
+    <div class="page-title">Reading History</div>
+    <div>
+      <select id="history-station-select" onchange="loadHistory()">
+        <?php foreach ($stations as $sid): ?>
+          <option value="<?php echo $sid;?>">Station <?php echo $sid;?></option>
+        <?php endforeach;?>
+      </select>
+    </div>
+    <table class="history-table">
+      <thead><tr><th>#</th><th>pH</th><th>Temp (°C)</th><th>Level (%)</th><th>Status</th><th>Recorded At</th></tr></thead>
+      <tbody id="history-body"><tr><td colspan="6" style="color:var(--text-dim);padding:16px">Select a station</td></tr></tbody>
+    </table>
+  </div>
 
-<hr>
+  <!-- PRESET LIBRARY -->
+  <div class="page" id="preset-page">
+    <div class="page-title">Fish Preset Library</div>
+    <div id="new-preset-form">
+      <div class="section-title">New Preset</div>
+      <div class="form-row"><label>Fish Name</label><input type="text" id="np-name" placeholder="e.g. Salmon"></div>
+      <div class="form-row"><label>Image URL (optional)</label><input type="text" id="np-img" placeholder="https://..."></div>
+      <div class="form-grid">
+        <div class="form-field"><label>pH Min</label><input type="number" step="0.01" id="np-ph-min"></div>
+        <div class="form-field"><label>pH Max</label><input type="number" step="0.01" id="np-ph-max"></div>
+        <div></div>
+        <div class="form-field"><label>Temp Min °C</label><input type="number" step="0.1" id="np-temp-min"></div>
+        <div class="form-field"><label>Temp Max °C</label><input type="number" step="0.1" id="np-temp-max"></div>
+        <div></div>
+        <div class="form-field"><label>Level Min %</label><input type="number" step="0.1" id="np-lvl-min"></div>
+        <div class="form-field"><label>Level Max %</label><input type="number" step="0.1" id="np-lvl-max"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-gold" onclick="saveNewPreset()">Save</button>
+        <button class="btn-dim" onclick="toggleNewForm(false)">Cancel</button>
+      </div>
+      <div class="modal-msg" id="np-msg"></div>
+    </div>
+    <div class="preset-lib-grid" id="preset-lib-grid"></div>
+  </div>
 
-<!-- Setpoints -->
-<h2>Current Setpoints</h2>
-<p>Target pH: <strong id="sp_ph">--</strong></p>
-<p>Target Temp: <strong id="sp_temp">--</strong> °C</p>
-<p>Target Level: <strong id="sp_level">--</strong> %</p>
-<p>Last updated: <span id="sp_time">--</span></p>
+</div>
 
-<hr>
+<!-- MODAL -->
+<div id="modal-overlay" onclick="closeModalOutside(event)">
+<div id="modal">
+  <div class="modal-header">
+    <h2 id="modal-title">Station --</h2>
+    <div class="modal-header-btns">
+      <button class="btn-dim" onclick="saveModalPresets()">Save</button>
+      <button class="btn-red" onclick="closeModal()">Close</button>
+    </div>
+  </div>
 
-<!-- History table -->
-<h2>Last 30 Readings</h2>
-<table border="1" cellpadding="6" cellspacing="0" id="historyTable">
-    <thead>
-        <tr>
-            <th>#</th>
-            <th>pH</th>
-            <th>Temp (°C)</th>
-            <th>Level (%)</th>
-            <th>Status</th>
-            <th>Recorded At</th>
-        </tr>
-    </thead>
-    <tbody id="historyBody">
-        <tr><td colspan="6">Loading...</td></tr>
-    </tbody>
-</table>
+  <!-- Live readings -->
+  <div class="modal-readings">
+    <div class="reading-box">
+      <div class="reading-label">pH</div>
+      <div class="reading-value" id="m-ph">--</div>
+      <div class="reading-range" id="m-range-ph">Range: --</div>
+    </div>
+    <div class="reading-box">
+      <div class="reading-label">Temperature</div>
+      <div class="reading-value" id="m-temp">--</div>
+      <div class="reading-range" id="m-range-temp">Range: --</div>
+    </div>
+    <div class="reading-box">
+      <div class="reading-label">Water Level</div>
+      <div class="reading-value" id="m-level">--</div>
+      <div class="reading-range" id="m-range-level">Range: --</div>
+    </div>
+  </div>
 
+  <!-- Active presets -->
+  <div>
+    <div class="section-title">Active Presets</div>
+    <div class="preset-chips" id="m-chips"></div>
+    <button class="btn-dim" onclick="togglePicker()">+ Add Preset</button>
+    <div id="preset-picker">
+      <div class="picker-grid" id="picker-grid"></div>
+      <div class="btn-row" style="margin-top:10px;">
+        <button class="btn-gold" onclick="saveAssignments()">Apply</button>
+        <button class="btn-dim" onclick="togglePicker()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Averaged range display -->
+  <div id="avg-display" style="border:1px solid var(--border-dim);padding:12px 14px;font-size:.75rem;color:var(--text-dim);line-height:2;display:none;">
+    <span style="font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;color:var(--border);">AVERAGED TARGET</span><br>
+    <span id="avg-display-text">--</span>
+  </div>
+
+  <!-- Manual override — collapsed -->
+  <div>
+    <button class="override-toggle" id="override-toggle" onclick="toggleOverride()">
+      <i class="arrow">▶</i> Manual Override
+      <span style="font-size:.55rem;color:var(--text-dim);letter-spacing:1px;margin-left:4px;">(overrides presets)</span>
+    </button>
+    <div id="manual-body">
+      <div class="manual-hint" id="m-avg-hint">
+        Preset average: <b id="m-avg-text">no presets assigned</b>
+      </div>
+      <div class="manual-grid">
+        <div class="manual-field"><label>Override pH</label><input type="number" step="0.01" id="m-a-ph" placeholder="--"></div>
+        <div class="manual-field"><label>Override Temp °C</label><input type="number" step="0.1" id="m-a-temp" placeholder="--"></div>
+        <div class="manual-field"><label>Override Level %</label><input type="number" step="0.1" id="m-a-level" placeholder="--"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-gold" onclick="saveManual()">Save Override</button>
+        <button class="btn-dim" onclick="clearManual()">Clear Override</button>
+      </div>
+    </div>
+    <div class="modal-msg" id="m-msg"></div>
+  </div>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-    const stationSelect = document.getElementById('stationSelect');
+const stations  = <?php echo json_encode($stations); ?>;
+const charts    = {};
+let activeModal = null;
 
-    function fetchData() {
-        const stationId = stationSelect.value;
+// ── Nav ──────────────────────────────────────────────────
+function showPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(name + '-page').classList.add('active');
+  btn.classList.add('active');
+  if (name === 'history') loadHistory();
+  if (name === 'preset')  renderPresetLib();
+}
 
-        fetch(`getdata.php?station_id=${stationId}`)
-            .then(r => r.json())
-            .then(data => {
-                // --- Latest ---
-                const l = data.latest;
-                if (l) {
-                    document.getElementById('val_ph').textContent    = l.ph    ?? '--';
-                    document.getElementById('val_temp').textContent  = l.temp  ?? '--';
-                    document.getElementById('val_level').textContent = l.level ?? '--';
-                    document.getElementById('val_status').textContent = l.status ?? 'unchecked';
-                    document.getElementById('val_time').textContent  = l.recorded_at ?? '--';
-                }
+// ── Donuts ───────────────────────────────────────────────
+function initDonut(sid) {
+  const ctx = document.getElementById('donut-' + sid).getContext('2d');
+  charts[sid] = new Chart(ctx, {
+    type: 'doughnut',
+    data: { datasets: [
+      { data:[0,100], backgroundColor:['#4a90d9','#1a1a1a'], borderWidth:0 },
+      { data:[0,100], backgroundColor:['#e8833a','#1a1a1a'], borderWidth:0 },
+      { data:[0,100], backgroundColor:['#aaaaaa','#1a1a1a'], borderWidth:0 }
+    ]},
+    options:{ cutout:'30%', responsive:false, plugins:{ legend:{display:false}, tooltip:{enabled:false} } }
+  });
+}
+function clamp(v,lo=0,hi=100){return Math.min(Math.max(v,lo),hi);}
+function updateDonut(sid, ph, temp, level) {
+  const c = charts[sid]; if (!c) return;
+  c.data.datasets[0].data = [clamp(((ph-5.5)/3.5)*100),  100-clamp(((ph-5.5)/3.5)*100)];
+  c.data.datasets[1].data = [clamp(((temp-15)/25)*100),   100-clamp(((temp-15)/25)*100)];
+  c.data.datasets[2].data = [clamp(level),                100-clamp(level)];
+  c.update('none');
+}
 
-                // --- Setpoints ---
-                const sp = data.setpoints;
-                if (sp) {
-                    document.getElementById('sp_ph').textContent    = sp.a_ph    ?? '--';
-                    document.getElementById('sp_temp').textContent  = sp.a_temp  ?? '--';
-                    document.getElementById('sp_level').textContent = sp.a_level ?? '--';
-                    document.getElementById('sp_time').textContent  = sp.updated_at ?? '--';
-                }
+// ── Poll ─────────────────────────────────────────────────
+function pollAll() {
+  stations.forEach(sid => {
+    fetch('getdata.php?station_id=' + sid)
+      .then(r => r.json())
+      .then(data => {
+        updateCard(sid, data);
+        if (activeModal === sid) updateModal(data);
+      }).catch(()=>{});
+  });
+}
 
-                // --- History ---
-                const tbody = document.getElementById('historyBody');
-                tbody.innerHTML = '';
-                if (data.history && data.history.length > 0) {
-                    data.history.forEach((row, i) => {
-                        const tr = document.createElement('tr');
-                        tr.innerHTML = `
-                            <td>${i + 1}</td>
-                            <td>${row.ph}</td>
-                            <td>${row.temp}</td>
-                            <td>${row.level}</td>
-                            <td>${row.status ?? 'unchecked'}</td>
-                            <td>${row.recorded_at}</td>
-                        `;
-                        tbody.appendChild(tr);
-                    });
-                } else {
-                    tbody.innerHTML = '<tr><td colspan="6">No data</td></tr>';
-                }
-            })
-            .catch(err => console.error('Fetch error:', err));
-    }
+function updateCard(sid, data) {
+  const l = data.latest, ef = data.effective;
+  if (!l) return;
 
-    // On station change
-    stationSelect.addEventListener('change', () => {
-        history.pushState(null, null, `?station_id=${stationSelect.value}`);
-        fetchData();
+  document.getElementById('readings-' + sid).innerHTML =
+    `pH &nbsp;: ${l.ph}<br>Temp : ${l.temp} °C<br>Level: ${l.level} %`;
+
+  // Target line
+  const tEl = document.getElementById('target-' + sid);
+  if (ef) {
+    const src = ef.source === 'manual' ? 'manual'
+      : (ef.presets ? ef.presets.map(p=>p.name).join('+') : '--');
+    tEl.innerHTML = `<span style="color:var(--border)">${src}</span> &nbsp;` +
+      `pH ${ef.ph_min}–${ef.ph_max} | T ${ef.temp_min}–${ef.temp_max} | Lv ${ef.level_min}–${ef.level_max}`;
+  } else {
+    tEl.textContent = 'No preset set';
+  }
+
+  // Status badge + card glow
+  const sEl  = document.getElementById('status-' + sid);
+  const card = document.getElementById('card-' + sid);
+  card.classList.remove('glow-ok','glow-alert');
+
+  if (l.status === 'ok') {
+    sEl.className = 'card-status ok';
+    sEl.textContent = '✓ All OK';
+    card.classList.add('glow-ok');
+  } else if (l.status && l.status.startsWith('alert:')) {
+    sEl.className = 'card-status alert';
+    sEl.textContent = '⚠ ' + l.status.replace('alert:','').toUpperCase();
+    card.classList.add('glow-alert');
+  } else {
+    sEl.className = 'card-status pending';
+    sEl.textContent = '-- --';
+  }
+
+  updateDonut(sid, parseFloat(l.ph), parseFloat(l.temp), parseFloat(l.level));
+}
+
+// ── Modal ────────────────────────────────────────────────
+function openModal(sid) {
+  activeModal = sid;
+  document.getElementById('modal-title').textContent = 'Station ' + sid;
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('preset-picker').classList.remove('open');
+  document.getElementById('m-msg').textContent = '';
+  // reset override panel
+  document.getElementById('manual-body').classList.remove('open');
+  document.getElementById('override-toggle').classList.remove('open');
+  ['m-a-ph','m-a-temp','m-a-level'].forEach(id => document.getElementById(id).value = '');
+  fetch('getdata.php?station_id=' + sid).then(r=>r.json()).then(data => updateModal(data));
+}
+
+function updateModal(data) {
+  const l  = data.latest;
+  const ef = data.effective;
+  const assigned = data.assigned_ids || [];
+  const allP     = data.all_presets  || [];
+
+  if (l) {
+    document.getElementById('m-ph').textContent    = l.ph;
+    document.getElementById('m-temp').textContent  = l.temp + ' °C';
+    document.getElementById('m-level').textContent = l.level + ' %';
+  }
+
+  // Ranges under readings
+  if (ef) {
+    document.getElementById('m-range-ph').textContent    = `${ef.ph_min} – ${ef.ph_max}`;
+    document.getElementById('m-range-temp').textContent  = `${ef.temp_min} – ${ef.temp_max} °C`;
+    document.getElementById('m-range-level').textContent = `${ef.level_min} – ${ef.level_max} %`;
+  } else {
+    ['m-range-ph','m-range-temp','m-range-level'].forEach(id => document.getElementById(id).textContent = '--');
+  }
+
+  // Averaged display box
+  const avgBox  = document.getElementById('avg-display');
+  const avgText = document.getElementById('avg-display-text');
+  if (ef && ef.source === 'presets') {
+    const midPh    = ((+ef.ph_min    + +ef.ph_max)    / 2).toFixed(2);
+    const midTemp  = ((+ef.temp_min  + +ef.temp_max)  / 2).toFixed(1);
+    const midLevel = ((+ef.level_min + +ef.level_max) / 2).toFixed(1);
+    avgText.innerHTML =
+      `pH <b style="color:var(--text)">${ef.ph_min}–${ef.ph_max}</b> (mid: ${midPh}) &nbsp;|&nbsp; ` +
+      `Temp <b style="color:var(--text)">${ef.temp_min}–${ef.temp_max} °C</b> (mid: ${midTemp}) &nbsp;|&nbsp; ` +
+      `Level <b style="color:var(--text)">${ef.level_min}–${ef.level_max} %</b> (mid: ${midLevel})`;
+    avgBox.style.display = 'block';
+    // Also show in manual hint
+    document.getElementById('m-avg-text').textContent =
+      `pH ${midPh} | Temp ${midTemp} °C | Level ${midLevel} %`;
+  } else if (ef && ef.source === 'manual') {
+    avgText.innerHTML = `<span style="color:var(--border)">Manual override active</span> — pH ${ef.a_ph} | Temp ${ef.a_temp} °C | Level ${ef.a_level} %`;
+    avgBox.style.display = 'block';
+    document.getElementById('m-avg-text').textContent = 'manual override active';
+    // Pre-fill override fields
+    document.getElementById('m-a-ph').value    = ef.a_ph;
+    document.getElementById('m-a-temp').value  = ef.a_temp;
+    document.getElementById('m-a-level').value = ef.a_level;
+  } else {
+    avgBox.style.display = 'none';
+    document.getElementById('m-avg-text').textContent = 'no presets assigned';
+  }
+
+  // Chips
+  const chipsEl = document.getElementById('m-chips');
+  chipsEl.innerHTML = assigned.length === 0 ? '' :
+    assigned.map(pid => {
+      const p = allP.find(x => parseInt(x.id) === parseInt(pid));
+      return p ? `<span class="chip">${p.name}<button class="chip-x" onclick="unassignPreset(${p.id})">×</button></span>` : '';
+    }).join('');
+
+  // Picker
+  const pickerGrid = document.getElementById('picker-grid');
+  pickerGrid.innerHTML = allP.length === 0
+    ? '<span style="color:var(--text-dim);font-size:.8rem">No presets in library</span>'
+    : allP.map(p => `
+      <div class="picker-item">
+        <input type="checkbox" id="pk-${p.id}" value="${p.id}" ${assigned.includes(parseInt(p.id)) ? 'checked' : ''}>
+        <label for="pk-${p.id}">${p.name}<br>
+          <span style="font-size:.65rem;color:var(--text-dim)">pH ${p.ph_min}–${p.ph_max} | T ${p.temp_min}–${p.temp_max}</span>
+        </label>
+      </div>`).join('');
+}
+
+// Save button in modal header — saves current picker state if open, otherwise no-op with confirm
+function saveModalPresets() {
+  const pickerOpen = document.getElementById('preset-picker').classList.contains('open');
+  if (pickerOpen) {
+    saveAssignments(); // saveAssignments calls closeModal() on success
+  } else {
+    closeModal();
+  }
+}
+
+function togglePicker() { document.getElementById('preset-picker').classList.toggle('open'); }
+
+function saveAssignments() {
+  const checked = [...document.querySelectorAll('#picker-grid input:checked')].map(i=>i.value);
+  const sid = activeModal;
+  // Always clear manual override first so presets take primary control
+  fetch('setpreset.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=clear_manual&station_id=${sid}`
+  }).then(()=> {
+    fetch('setpreset.php', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:`action=assign&station_id=${sid}&preset_ids=${checked.join(',')}`
+    }).then(r=>r.json()).then(d => {
+      if (d.status === 'ok') {
+        document.getElementById('preset-picker').classList.remove('open');
+        fetch('getdata.php?station_id='+sid).then(r=>r.json()).then(data=>{
+          updateModal(data);
+          updateCard(sid, data);
+        });
+        closeModal();
+      }
     });
+  });
+}
 
-    // Auto refresh every 5s
-    setInterval(fetchData, 5000);
+function unassignPreset(presetId) {
+  fetch('setpreset.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=unassign&station_id=${activeModal}&preset_id=${presetId}`
+  }).then(r=>r.json()).then(d => {
+    if (d.status === 'ok') {
+      fetch('getdata.php?station_id='+activeModal).then(r=>r.json()).then(data=>{
+        updateModal(data);
+        updateCard(activeModal, data);
+      });
+    }
+  });
+}
 
-    // Initial load
-    fetchData();
+function toggleOverride() {
+  document.getElementById('manual-body').classList.toggle('open');
+  document.getElementById('override-toggle').classList.toggle('open');
+}
+
+function closeModal() {
+  activeModal = null;
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+function closeModalOutside(e) {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+}
+
+function saveManual() {
+  const ph = document.getElementById('m-a-ph').value;
+  const temp = document.getElementById('m-a-temp').value;
+  const level = document.getElementById('m-a-level').value;
+  if (!ph || !temp || !level) {
+    document.getElementById('m-msg').textContent = '✗ Fill all three fields';
+    setTimeout(()=>document.getElementById('m-msg').textContent='',3000); return;
+  }
+  fetch('setpreset.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=manual&station_id=${activeModal}&a_ph=${ph}&a_temp=${temp}&a_level=${level}`
+  }).then(r=>r.json()).then(d => {
+    const msg = document.getElementById('m-msg');
+    msg.textContent = d.status==='ok' ? '✓ Override saved' : '✗ '+d.message;
+    setTimeout(()=>msg.textContent='',3000);
+    if (d.status==='ok') fetch('getdata.php?station_id='+activeModal).then(r=>r.json()).then(data=>{
+      updateModal(data); updateCard(activeModal, data);
+    });
+  });
+}
+
+function clearManual() {
+  fetch('setpreset.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=clear_manual&station_id=${activeModal}`
+  }).then(r=>r.json()).then(d => {
+    const msg = document.getElementById('m-msg');
+    msg.textContent = d.status==='ok' ? '✓ Override cleared' : '✗ Error';
+    setTimeout(()=>msg.textContent='',3000);
+    ['m-a-ph','m-a-temp','m-a-level'].forEach(id=>document.getElementById(id).value='');
+    if (d.status==='ok') fetch('getdata.php?station_id='+activeModal).then(r=>r.json()).then(data=>{
+      updateModal(data); updateCard(activeModal, data);
+    });
+  });
+}
+
+// ── History ───────────────────────────────────────────────
+function loadHistory() {
+  const sid = document.getElementById('history-station-select').value;
+  fetch('getdata.php?station_id='+sid).then(r=>r.json()).then(data=>{
+    const tbody = document.getElementById('history-body');
+    tbody.innerHTML='';
+    (data.history||[]).forEach((row,i)=>{
+      const a = row.status && row.status.startsWith('alert:');
+      tbody.innerHTML+=`<tr><td>${i+1}</td><td>${row.ph}</td><td>${row.temp}</td><td>${row.level}</td>
+        <td class="${a?'status-alert':'status-ok'}">${row.status??'--'}</td><td>${row.recorded_at}</td></tr>`;
+    });
+  });
+}
+
+// ── Preset library ────────────────────────────────────────
+let localPresets = <?php echo json_encode($all_presets); ?>;
+
+function renderPresetLib() {
+  const grid = document.getElementById('preset-lib-grid');
+  grid.innerHTML = localPresets.map(p => {
+    const img = p.image_url
+      ? `<img class="lib-card-img" src="${p.image_url}" alt="${p.name}" onerror="this.style.display='none'">`
+      : `<div class="lib-card-img-placeholder">NO IMAGE</div>`;
+    return `<div class="preset-lib-card">
+      ${img}
+      <div class="lib-card-body">
+        <div class="lib-card-name">${p.name}</div>
+        <div class="lib-card-range">pH: ${p.ph_min}–${p.ph_max}<br>Temp: ${p.temp_min}–${p.temp_max} °C<br>Level: ${p.level_min}–${p.level_max} %</div>
+        <button class="lib-card-del" onclick="deletePreset(${p.id})">Delete</button>
+      </div>
+    </div>`;
+  }).join('') + `<div class="preset-lib-card new-card" onclick="toggleNewForm(true)">+ New Preset</div>`;
+}
+
+function toggleNewForm(open) {
+  document.getElementById('new-preset-form').classList.toggle('open', open);
+  if (open) document.getElementById('np-name').focus();
+}
+
+function saveNewPreset() {
+  const name = document.getElementById('np-name').value.trim();
+  if (!name) { document.getElementById('np-msg').textContent='✗ Name required'; return; }
+  const body = [
+    'action=create',
+    `name=${encodeURIComponent(name)}`,
+    `ph_min=${document.getElementById('np-ph-min').value}`,
+    `ph_max=${document.getElementById('np-ph-max').value}`,
+    `temp_min=${document.getElementById('np-temp-min').value}`,
+    `temp_max=${document.getElementById('np-temp-max').value}`,
+    `level_min=${document.getElementById('np-lvl-min').value}`,
+    `level_max=${document.getElementById('np-lvl-max').value}`,
+    `image_url=${encodeURIComponent(document.getElementById('np-img').value.trim())}`
+  ].join('&');
+  fetch('setpreset.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
+    .then(r=>r.json()).then(d=>{
+      if (d.status==='ok') {
+        localPresets.push({id:d.id,name:d.name,image_url:d.image_url??null,
+          ph_min:document.getElementById('np-ph-min').value,
+          ph_max:document.getElementById('np-ph-max').value,
+          temp_min:document.getElementById('np-temp-min').value,
+          temp_max:document.getElementById('np-temp-max').value,
+          level_min:document.getElementById('np-lvl-min').value,
+          level_max:document.getElementById('np-lvl-max').value});
+        toggleNewForm(false); renderPresetLib();
+        ['np-name','np-img','np-ph-min','np-ph-max','np-temp-min','np-temp-max','np-lvl-min','np-lvl-max']
+          .forEach(id=>document.getElementById(id).value='');
+      } else {
+        document.getElementById('np-msg').textContent='✗ '+d.message;
+        setTimeout(()=>document.getElementById('np-msg').textContent='',3000);
+      }
+    });
+}
+
+function deletePreset(id) {
+  if (!confirm('Delete this preset? It will be removed from all stations.')) return;
+  fetch('setpreset.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=delete&id=${id}`})
+    .then(r=>r.json()).then(d=>{
+      if (d.status==='ok') { localPresets=localPresets.filter(p=>p.id!=id); renderPresetLib(); }
+      else alert('Delete failed: '+d.message);
+    });
+}
+
+// ── Boot ─────────────────────────────────────────────────
+stations.forEach(sid=>initDonut(sid));
+renderPresetLib();
+pollAll();
+setInterval(pollAll, 5000);
 </script>
-
 </body>
 </html>
