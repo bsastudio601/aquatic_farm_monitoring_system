@@ -4,6 +4,7 @@ require 'config.php';
 header('Content-Type: application/json');
 
 $station_id = isset($_GET['station_id']) ? intval($_GET['station_id']) : 1;
+$limit      = isset($_GET['limit'])     ? min(intval($_GET['limit']), 9999) : 30;
 
 $db = connectDB();
 
@@ -83,8 +84,9 @@ if ($is_manual) {
             'temp_max'  => round($temp_max  / $count, 2),
             'level_min' => round($level_min / $count, 2),
             'level_max' => round($level_max / $count, 2),
-            'source'    => 'presets',
-            'presets'   => $presets
+            'source'    => 'preset',
+            'presets'   => $presets,
+            'updated_at'=> $sp_row['updated_at'] ?? null
         ];
     }
 }
@@ -105,9 +107,9 @@ $hist = $db->prepare("
     FROM sensor_data
     WHERE station_id = ?
     ORDER BY recorded_at DESC
-    LIMIT 30
+    LIMIT ?
 ");
-$hist->bind_param("i", $station_id);
+$hist->bind_param("ii", $station_id, $limit);
 $hist->execute();
 $rows = $hist->get_result()->fetch_all(MYSQLI_ASSOC);
 $hist->close();
