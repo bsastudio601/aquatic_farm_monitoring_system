@@ -1,66 +1,79 @@
 <?php
 include_once('config.php');
+
 header('Content-Type: application/json');
 
 $correct_api_key = "iloveher143";
 
+// --- Validate required fields ---
 $required = ['api_key', 'station_id', 'ph', 'temp', 'level'];
-foreach ($required as $f) {
-    if (!isset($_POST[$f])) {
-        echo json_encode(['status'=>'error',"message"=>"Missing $f"]);
+foreach ($required as $field) {
+    if (!isset($_POST[$field])) {
+        echo json_encode(['status' => 'error', 'message' => "Missing field: $field"]);
         exit;
     }
 }
 
-if ($_POST['api_key'] !== $correct_api_key) {
-    echo json_encode(['status'=>'error','message'=>'Invalid API key']);
+$api_key    = $_POST['api_key'];
+$station_id = intval($_POST['station_id']);
+$ph         = floatval($_POST['ph']);
+$temp       = floatval($_POST['temp']);
+$level      = floatval($_POST['level']);
+$extra      = isset($_POST['extra']) ? $_POST['extra'] : null;
+
+if ($extra !== null) {
+    json_decode($extra);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid JSON in extra field']);
+        exit;
+    }
+}
+
+if ($api_key !== $correct_api_key) {
+    echo json_encode(['status' => 'error', 'message' => 'Invalid API key']);
     exit;
 }
 
 $db = connectDB();
 
-$station_id = intval($_POST['station_id']);
-$ph = floatval($_POST['ph']);
-$temp = floatval($_POST['temp']);
-$level = floatval($_POST['level']);
-$extra = $_POST['extra'] ?? null;
-
-/* ---------- INSERT SENSOR DATA ---------- */
+// --- Insert sensor reading ---
 $stmt = $db->prepare("
     INSERT INTO sensor_data (station_id, ph, temp, level, extra, recorded_at)
     VALUES (?, ?, ?, ?, ?, NOW())
 ");
 $stmt->bind_param("iddds", $station_id, $ph, $temp, $level, $extra);
-$stmt->execute();
-$insert_id = $db->insert_id;
+
+if (!$stmt->execute()) {
+    echo json_encode(['status' => 'error', 'message' => 'Insert failed: ' . $stmt->error]);
+    $stmt->close();
+    $db->close();
+    exit;
+}
+$inserted_id = $db->insert_id;
 $stmt->close();
 
-/* ---------- LOAD SETPOINT SOURCE ---------- */
-$manual = null;
+// --- Determine effective range ---
+// Check source in station_setpoints: only 'manual' uses single-value override
+$ph_min = $ph_max = $temp_min = $temp_max = $level_min = $level_max = null;
+$source = 'fallback';
 
-$man = $db->prepare("
-    SELECT a_ph, a_temp, a_level, source
-    FROM station_setpoints
-    WHERE station_id = ?
-");
+$man = $db->prepare("SELECT a_ph, a_temp, a_level, source FROM station_setpoints WHERE station_id = ?");
 $man->bind_param("i", $station_id);
 $man->execute();
-$manual = $man->get_result()->fetch_assoc();
+$sp_row = $man->get_result()->fetch_assoc();
 $man->close();
 
-/* ---------- DEFAULT MIDPOINTS ---------- */
-$ph_min = 7.0; $ph_max = 8.0;
-$temp_min = 25.0; $temp_max = 30.0;
-$level_min = 60.0; $level_max = 90.0;
-
-/* ---------- APPLY MANUAL OVERRIDE ---------- */
-if ($manual && $manual['source'] === 'manual') {
-    $ph_mid    = floatval($manual['a_ph']);
-    $temp_mid  = floatval($manual['a_temp']);
-    $level_mid = floatval($manual['a_level']);
+if ($sp_row && ($sp_row['source'] ?? '') === 'manual') {
+    // Manual override — center value ± tolerance
+    $source    = 'manual';
+    $ph_min    = floatval($sp_row['a_ph'])    - 0.5;
+    $ph_max    = floatval($sp_row['a_ph'])    + 0.5;
+    $temp_min  = floatval($sp_row['a_temp'])  - 2.0;
+    $temp_max  = floatval($sp_row['a_temp'])  + 2.0;
+    $level_min = floatval($sp_row['a_level']) - 10.0;
+    $level_max = floatval($sp_row['a_level']) + 10.0;
 } else {
-
-    /* ---------- PULL PRESETS ---------- */
+    // Use actual preset min/max ranges (averaged if multiple)
     $pr = $db->prepare("
         SELECT fp.ph_min, fp.ph_max, fp.temp_min, fp.temp_max, fp.level_min, fp.level_max
         FROM fish_presets fp
@@ -73,43 +86,57 @@ if ($manual && $manual['source'] === 'manual') {
     $pr->close();
 
     if (!empty($presets)) {
+        $source = 'preset';
+        $count  = count($presets);
         $ph_min = $ph_max = $temp_min = $temp_max = $level_min = $level_max = 0;
-
         foreach ($presets as $p) {
-            $ph_min += $p['ph_min'];
-            $ph_max += $p['ph_max'];
-            $temp_min += $p['temp_min'];
-            $temp_max += $p['temp_max'];
-            $level_min += $p['level_min'];
-            $level_max += $p['level_max'];
+            $ph_min    += floatval($p['ph_min']);
+            $ph_max    += floatval($p['ph_max']);
+            $temp_min  += floatval($p['temp_min']);
+            $temp_max  += floatval($p['temp_max']);
+            $level_min += floatval($p['level_min']);
+            $level_max += floatval($p['level_max']);
         }
-
-        $count = count($presets);
-
-        $ph_mid    = ($ph_min / $count + $ph_max / $count) / 2;
-        $temp_mid  = ($temp_min / $count + $temp_max / $count) / 2;
-        $level_mid = ($level_min / $count + $level_max / $count) / 2;
-
+        $ph_min    /= $count; $ph_max    /= $count;
+        $temp_min  /= $count; $temp_max  /= $count;
+        $level_min /= $count; $level_max /= $count;
     } else {
-        $ph_mid = ($ph_min + $ph_max) / 2;
-        $temp_mid = ($temp_min + $temp_max) / 2;
-        $level_mid = ($level_min + $level_max) / 2;
+        // No preset assigned and no manual override — mark as unchecked, don't flag
+        $source = 'none';
     }
 }
 
-/* ---------- ENSURE SETPOINT ROW EXISTS ---------- */
-$db->query("
-    INSERT INTO station_setpoints (station_id, a_ph, a_temp, a_level, source)
-    VALUES ($station_id, 7, 28, 80, 'preset')
-    ON DUPLICATE KEY UPDATE station_id=station_id
-");
+// --- Flag only if we have a valid range ---
+if ($source !== 'none' && $source !== 'fallback') {
+    $flags = [];
+    if ($ph    < $ph_min    || $ph    > $ph_max)    $flags[] = 'ph';
+    if ($temp  < $temp_min  || $temp  > $temp_max)  $flags[] = 'temp';
+    if ($level < $level_min || $level > $level_max) $flags[] = 'level';
+    $status = empty($flags) ? 'ok' : 'alert:' . implode(',', $flags);
+} else {
+    $status = 'no_preset'; // no range defined — don't flag
+}
 
-/* ---------- RESPONSE TO ESP ---------- */
-echo json_encode([
-    'status'  => 'ok',
-    'a_ph'    => number_format($ph_mid, 2, '.', ''),
-    'a_temp'  => number_format($temp_mid, 2, '.', ''),
-    'a_level' => number_format($level_mid, 2, '.', '')
-]);
+$flag_stmt = $db->prepare("UPDATE sensor_data SET status = ? WHERE id = ?");
+$flag_stmt->bind_param("si", $status, $inserted_id);
+$flag_stmt->execute();
+$flag_stmt->close();
 
 $db->close();
+
+// --- Return full range to ESP ---
+$response = [
+    'status'    => 'ok',
+    'source'    => $source,
+    'a_ph'      => $ph_min !== null ? round(($ph_min + $ph_max) / 2, 2) : null,
+    'a_temp'    => $temp_min !== null ? round(($temp_min + $temp_max) / 2, 2) : null,
+    'a_level'   => $level_min !== null ? round(($level_min + $level_max) / 2, 2) : null,
+    'ph_min'    => $ph_min !== null ? round($ph_min, 2) : null,
+    'ph_max'    => $ph_max !== null ? round($ph_max, 2) : null,
+    'temp_min'  => $temp_min !== null ? round($temp_min, 2) : null,
+    'temp_max'  => $temp_max !== null ? round($temp_max, 2) : null,
+    'level_min' => $level_min !== null ? round($level_min, 2) : null,
+    'level_max' => $level_max !== null ? round($level_max, 2) : null,
+    'flag_status' => $status, // debug: what status was written to DB
+];
+echo json_encode($response);
