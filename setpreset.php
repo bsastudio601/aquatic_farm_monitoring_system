@@ -173,6 +173,17 @@ if ($action === 'create') {
     echo json_encode(['status' => $stmt->execute() ? 'ok' : 'error']);
     $stmt->close();
 
+} elseif ($action === 'rename') {
+    $station_id = intval($_POST['station_id'] ?? 0);
+    $name       = trim($_POST['name'] ?? '');
+    $stmt = $db->prepare("
+        INSERT INTO stations (station_id, name) VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE name = VALUES(name)
+    ");
+    $stmt->bind_param("is", $station_id, $name);
+    echo json_encode(['status' => $stmt->execute() ? 'ok' : 'error']);
+    $stmt->close();
+
 } else {
     echo json_encode(['status'=>'error','message'=>'Unknown action: '.$action]);
 }
