@@ -4,6 +4,25 @@ $db = connectDB();
 $stations_result = $db->query("SELECT DISTINCT station_id FROM sensor_data ORDER BY station_id");
 $stations = [];
 while ($row = $stations_result->fetch_assoc()) $stations[] = $row['station_id'];
+
+// Fetch custom names from stations table
+$names_result = $db->query("SELECT station_id, name FROM stations");
+$station_names = [];
+if ($names_result) {
+    while ($row = $names_result->fetch_assoc()) {
+        $station_names[$row['station_id']] = $row['name'];
+    }
+}
+// Auto-insert missing station rows so they can be named
+foreach ($stations as $sid) {
+    if (!isset($station_names[$sid])) {
+        $ins = $db->prepare("INSERT IGNORE INTO stations (station_id, name) VALUES (?, '')");
+        $ins->bind_param("i", $sid);
+        $ins->execute();
+        $ins->close();
+        $station_names[$sid] = '';
+    }
+}
 $all_presets = $db->query("SELECT * FROM fish_presets ORDER BY name")->fetch_all(MYSQLI_ASSOC);
 $db->close();
 ?>
@@ -84,6 +103,8 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 .btn-dim:hover{border-color:#666;color:#999;}
 .btn-red{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px 14px;cursor:pointer;transition:all .2s;}
 .btn-red:hover{border-color:#aa3333;color:#cc4444;background:rgba(160,40,40,.08);}
+.btn-save{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px 14px;cursor:pointer;transition:all .2s;}
+.btn-save:hover{border-color:#3a9a3a;color:#5dcc5d;background:rgba(40,140,40,.08);box-shadow:0 0 14px rgba(60,180,60,.4),0 0 4px rgba(60,180,60,.2);}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
 
 /* ── Modal ── */
@@ -91,7 +112,7 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 #modal-overlay.open{display:flex;}
 #modal{background:var(--panel);border:1px solid var(--border);width:680px;max-width:96vw;max-height:92vh;overflow-y:auto;padding:28px;display:flex;flex-direction:column;gap:20px;}
 .modal-header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-dim);padding-bottom:14px;gap:10px;}
-.modal-header h2{font-family:'Orbitron',sans-serif;font-size:.9rem;letter-spacing:3px;color:var(--border);flex:1;}
+.modal-header h2{font-family:'Orbitron',sans-serif;font-size:.9rem;letter-spacing:3px;color:var(--border);}
 .modal-header-btns{display:flex;gap:8px;}
 
 .modal-readings{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
@@ -142,6 +163,19 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 .status-ok{color:var(--ok-t)!important;}
 .status-alert{color:var(--alert-t)!important;}
 #history-station-select{background:var(--panel);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;padding:8px 12px;font-size:.85rem;outline:none;}
+.hist-controls{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;}
+.hist-control-group{display:flex;flex-direction:column;gap:4px;}
+.hist-label{font-size:.6rem;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase;font-family:'Orbitron',sans-serif;}
+.hist-controls input[type=number]{background:var(--panel);border:1px solid var(--border-dim);color:var(--text);font-family:'Share Tech Mono',monospace;padding:8px 10px;font-size:.85rem;outline:none;}
+.hist-controls input[type=number]:focus{border-color:var(--border);box-shadow:0 0 10px rgba(200,168,75,.2);}
+.hist-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;min-height:0;}
+.hist-panel{display:flex;flex-direction:column;gap:8px;min-width:0;}
+.hist-scroll{overflow-x:auto;}
+.hist-count{font-family:'Share Tech Mono',monospace;font-size:.65rem;color:var(--text-dim);letter-spacing:0;margin-left:8px;text-transform:none;}
+.history-table .source-preset{color:var(--border);}
+.history-table .source-manual{color:#aaa8e0;}
+.history-table .source-none{color:var(--text-dim);}
+@media(max-width:900px){.hist-grid{grid-template-columns:1fr;}}
 
 /* ── Preset library ── */
 .preset-lib-grid{display:flex;flex-wrap:wrap;gap:16px;padding-top:8px;}
@@ -218,6 +252,55 @@ select:hover {
 .sidebar-logo {
   text-shadow:0 0 12px rgba(200,168,75,.3);
 }
+/* ── Inline station rename ── */
+.name-display {
+  display:flex; align-items:center; gap:10px; cursor:default;
+}
+.name-text {
+  font-family:'Orbitron',sans-serif; font-size:.85rem;
+  letter-spacing:2px; color:var(--border);
+}
+.pencil-btn {
+  background:none; border:none; cursor:pointer; padding:2px 4px;
+  color:var(--border-dim); font-size:.9rem; line-height:1;
+  transition:color .2s, text-shadow .2s; opacity:.5;
+}
+.pencil-btn:hover {
+  color:var(--border); opacity:1;
+  text-shadow:0 0 8px rgba(200,168,75,.6);
+}
+.name-edit {
+  display:none; align-items:center; gap:8px;
+}
+.name-edit.open { display:flex; }
+.name-edit input {
+  background:var(--bg); border:1px solid var(--border);
+  color:var(--text); font-family:'Share Tech Mono',monospace;
+  font-size:.88rem; padding:5px 10px; outline:none;
+  flex:1; min-width:0;
+  box-shadow:0 0 10px rgba(200,168,75,.15);
+}
+.name-edit input:focus {
+  box-shadow:0 0 14px rgba(200,168,75,.3);
+}
+.name-confirm {
+  background:none; border:none; cursor:pointer; padding:2px 6px;
+  color:var(--text-dim); font-size:1rem; line-height:1;
+  transition:color .2s, text-shadow .2s;
+}
+.name-confirm:hover {
+  color:#5dcc5d;
+  text-shadow:0 0 8px rgba(60,200,60,.6);
+}
+.name-cancel {
+  background:none; border:none; cursor:pointer; padding:2px 6px;
+  color:var(--text-dim); font-size:1rem; line-height:1;
+  transition:color .2s, text-shadow .2s;
+}
+.name-cancel:hover {
+  color:var(--alert-t);
+  text-shadow:0 0 8px rgba(255,80,80,.5);
+}
 .page-title {
   text-shadow:0 0 16px rgba(200,168,75,.2);
 }
@@ -261,7 +344,7 @@ select:hover {
     <div id="cards-container">
       <?php foreach ($stations as $sid): ?>
         <div class="station-card" id="card-<?php echo $sid;?>" onclick="openModal(<?php echo $sid;?>)">
-          <div class="card-title">Station <?php echo $sid;?></div>
+          <div class="card-title" id="card-title-<?php echo $sid;?>"><?php echo htmlspecialchars($station_names[$sid] ?: "Station $sid"); ?></div>
           <div class="donut-wrap"><canvas id="donut-<?php echo $sid;?>" width="120" height="120"></canvas></div>
           <div class="card-readings" id="readings-<?php echo $sid;?>">pH &nbsp;: --<br>Temp : -- °C<br>Level: -- %</div>
           <div class="card-target" id="target-<?php echo $sid;?>">loading…</div>
@@ -273,18 +356,56 @@ select:hover {
 
   <!-- HISTORY -->
   <div class="page" id="history-page">
-    <div class="page-title">Reading History</div>
-    <div>
-      <select id="history-station-select" onchange="loadHistory()">
-        <?php foreach ($stations as $sid): ?>
-          <option value="<?php echo $sid;?>">Station <?php echo $sid;?></option>
-        <?php endforeach;?>
-      </select>
+    <div class="page-title">Data History</div>
+
+    <!-- Controls row -->
+    <div class="hist-controls">
+      <div class="hist-control-group">
+        <label class="hist-label">Station</label>
+        <select id="history-station-select" onchange="loadHistory()">
+          <?php foreach ($stations as $sid): ?>
+            <option value="<?php echo $sid;?>"><?php echo htmlspecialchars($station_names[$sid] ?: "Station $sid"); ?></option>
+          <?php endforeach;?>
+        </select>
+      </div>
+      <div class="hist-control-group">
+        <label class="hist-label">Rows to show</label>
+        <input type="number" id="hist-limit" value="50" min="1" max="9999"
+          onchange="loadHistory()" style="width:80px;">
+      </div>
+      <button class="btn-dim" onclick="loadHistory()">Refresh</button>
     </div>
-    <table class="history-table">
-      <thead><tr><th>#</th><th>pH</th><th>Temp (°C)</th><th>Level (%)</th><th>Status</th><th>Recorded At</th></tr></thead>
-      <tbody id="history-body"><tr><td colspan="6" style="color:var(--text-dim);padding:16px">Select a station</td></tr></tbody>
-    </table>
+
+    <!-- Two tables side by side -->
+    <div class="hist-grid">
+
+      <!-- Sensor readings -->
+      <div class="hist-panel">
+        <div class="section-title">Sensor Readings <span class="hist-count" id="sensor-count"></span></div>
+        <div class="hist-scroll">
+          <table class="history-table">
+            <thead><tr><th>#</th><th>pH</th><th>Temp °C</th><th>Level %</th><th>Status</th><th>Recorded At</th></tr></thead>
+            <tbody id="history-body">
+              <tr><td colspan="6" style="color:var(--text-dim);padding:16px">Select a station</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Setpoints sent to ESP -->
+      <div class="hist-panel">
+        <div class="section-title">Current Setpoints <span class="hist-count" id="setpoint-count"></span></div>
+        <div class="hist-scroll">
+          <table class="history-table">
+            <thead><tr><th>Source</th><th>pH Range</th><th>Temp Range</th><th>Level Range</th><th>Updated At</th></tr></thead>
+            <tbody id="setpoint-body">
+              <tr><td colspan="5" style="color:var(--text-dim);padding:16px">Select a station</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
   </div>
 
   <!-- PRESET LIBRARY -->
@@ -319,9 +440,21 @@ select:hover {
 <div id="modal-overlay" onclick="closeModalOutside(event)">
 <div id="modal">
   <div class="modal-header">
-    <h2 id="modal-title">Station --</h2>
+    <!-- Name display + inline edit -->
+    <div style="flex:1;min-width:0;">
+      <div class="name-display" id="name-display">
+        <h2 id="modal-title">Station --</h2>
+        <button class="pencil-btn" title="Rename" onclick="openNameEdit()">✏</button>
+      </div>
+      <div class="name-edit" id="name-edit">
+        <input type="text" id="m-station-name" placeholder="Station name…"
+          onkeydown="if(event.key==='Enter')saveStationName();if(event.key==='Escape')closeNameEdit();">
+        <button class="name-confirm" title="Save" onclick="saveStationName()">✓</button>
+        <button class="name-cancel" title="Cancel" onclick="closeNameEdit()">✕</button>
+      </div>
+    </div>
     <div class="modal-header-btns">
-      <button class="btn-dim" onclick="saveModalPresets()">Save</button>
+      <button class="btn-save" onclick="saveModalPresets()">Save</button>
       <button class="btn-red" onclick="closeModal()">Close</button>
     </div>
   </div>
@@ -393,7 +526,8 @@ select:hover {
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
-const stations  = <?php echo json_encode($stations); ?>;
+const stations     = <?php echo json_encode($stations); ?>;
+const stationNames = <?php echo json_encode($station_names); ?>; // station_id => name
 const charts    = {};
 let activeModal = null;
 
@@ -472,6 +606,9 @@ function updateCard(sid, data) {
     sEl.className = 'card-status alert';
     sEl.textContent = '⚠ ' + l.status.replace('alert:','').toUpperCase();
     card.classList.add('glow-alert');
+  } else if (l.status === 'no_preset') {
+    sEl.className = 'card-status pending';
+    sEl.textContent = '○ No preset set';
   } else {
     sEl.className = 'card-status pending';
     sEl.textContent = '-- --';
@@ -483,7 +620,7 @@ function updateCard(sid, data) {
 // ── Modal ────────────────────────────────────────────────
 function openModal(sid) {
   activeModal = sid;
-  document.getElementById('modal-title').textContent = 'Station ' + sid;
+  document.getElementById('modal-title').textContent = stationNames[sid] || 'Station ' + sid;
   document.getElementById('modal-overlay').classList.add('open');
   document.getElementById('preset-picker').classList.remove('open');
   document.getElementById('m-msg').textContent = '';
@@ -491,6 +628,9 @@ function openModal(sid) {
   document.getElementById('manual-body').classList.remove('open');
   document.getElementById('override-toggle').classList.remove('open');
   ['m-a-ph','m-a-temp','m-a-level'].forEach(id => document.getElementById(id).value = '');
+  // Pre-fill name input and reset to display mode
+  document.getElementById('m-station-name').value = stationNames[sid] || '';
+  closeNameEdit();
   fetch('getdata.php?station_id=' + sid).then(r=>r.json()).then(data => updateModal(data));
 }
 
@@ -619,6 +759,38 @@ function toggleOverride() {
   document.getElementById('override-toggle').classList.toggle('open');
 }
 
+function openNameEdit() {
+  document.getElementById('name-display').style.display = 'none';
+  document.getElementById('name-edit').classList.add('open');
+  document.getElementById('m-station-name').focus();
+  document.getElementById('m-station-name').select();
+}
+
+function closeNameEdit() {
+  document.getElementById('name-display').style.display = '';
+  document.getElementById('name-edit').classList.remove('open');
+}
+
+function saveStationName() {
+  const name = document.getElementById('m-station-name').value.trim();
+  const sid  = activeModal;
+  fetch('setpreset.php', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:`action=rename&station_id=${sid}&name=${encodeURIComponent(name)}`
+  }).then(r=>r.json()).then(d => {
+    if (d.status === 'ok') {
+      stationNames[sid] = name;
+      const display = name || 'Station ' + sid;
+      document.getElementById('card-title-' + sid).textContent = display;
+      document.getElementById('modal-title').textContent = display;
+      closeNameEdit();
+      const msg = document.getElementById('m-msg');
+      msg.textContent = '✓ Renamed';
+      setTimeout(()=>msg.textContent='', 2000);
+    }
+  });
+}
+
 function closeModal() {
   activeModal = null;
   document.getElementById('modal-overlay').classList.remove('open');
@@ -665,16 +837,54 @@ function clearManual() {
 
 // ── History ───────────────────────────────────────────────
 function loadHistory() {
-  const sid = document.getElementById('history-station-select').value;
-  fetch('getdata.php?station_id='+sid).then(r=>r.json()).then(data=>{
-    const tbody = document.getElementById('history-body');
-    tbody.innerHTML='';
-    (data.history||[]).forEach((row,i)=>{
-      const a = row.status && row.status.startsWith('alert:');
-      tbody.innerHTML+=`<tr><td>${i+1}</td><td>${row.ph}</td><td>${row.temp}</td><td>${row.level}</td>
-        <td class="${a?'status-alert':'status-ok'}">${row.status??'--'}</td><td>${row.recorded_at}</td></tr>`;
+  const sid   = document.getElementById('history-station-select').value;
+  const limit = parseInt(document.getElementById('hist-limit').value) || 50;
+
+  fetch(`getdata.php?station_id=${sid}&limit=${limit}`)
+    .then(r => r.json())
+    .then(data => {
+
+      // --- Sensor readings from sensor_data ---
+      const tbody   = document.getElementById('history-body');
+      const readings = data.history || [];
+      document.getElementById('sensor-count').textContent = `(${readings.length} rows)`;
+      tbody.innerHTML = readings.length === 0
+        ? '<tr><td colspan="6" style="color:var(--text-dim);padding:16px">No data</td></tr>'
+        : readings.map((row, i) => {
+            const isAlert = row.status && row.status.startsWith('alert:');
+            const isOk    = row.status === 'ok';
+            return `<tr>
+              <td>${i+1}</td>
+              <td>${row.ph}</td>
+              <td>${row.temp}</td>
+              <td>${row.level}</td>
+              <td class="${isAlert?'status-alert':isOk?'status-ok':''}">${row.status??'--'}</td>
+              <td>${row.recorded_at}</td>
+            </tr>`;
+          }).join('');
+
+      // --- Current setpoints from station_setpoints ---
+      const spbody = document.getElementById('setpoint-body');
+      const sp     = data.effective;
+      document.getElementById('setpoint-count').textContent = '';
+      if (!sp) {
+        spbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);padding:16px">No setpoints configured</td></tr>';
+      } else {
+        const srcClass = sp.source === 'preset' ? 'source-preset'
+                       : sp.source === 'manual'  ? 'source-manual' : 'source-none';
+        spbody.innerHTML = `<tr>
+          <td class="${srcClass}">${sp.source??'--'}</td>
+          <td>${sp.ph_min??'--'} – ${sp.ph_max??'--'}</td>
+          <td>${sp.temp_min??'--'} – ${sp.temp_max??'--'} °C</td>
+          <td>${sp.level_min??'--'} – ${sp.level_max??'--'} %</td>
+          <td>${sp.updated_at??'--'}</td>
+        </tr>`;
+      }
+    })
+    .catch(() => {
+      document.getElementById('history-body').innerHTML =
+        '<tr><td colspan="6" style="color:var(--alert-t);padding:16px">Failed to load</td></tr>';
     });
-  });
 }
 
 // ── Preset library ────────────────────────────────────────
