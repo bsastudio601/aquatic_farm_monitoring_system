@@ -48,7 +48,7 @@ $db->close();
 body.light {
   --bg:#f0f0f0; --panel:#ffffff; --border:#111111; --border-dim:#cccccc;
   --text:#111111; --text-dim:#666666;
-  --ok:#d4edda; --ok-t:#1a6630; --alert:#f8d7da; --alert-t:#842029;
+  --ok:#4bff75; --ok-t:#1a6630; --alert:#f85151; --alert-t:#842029;
   --glow-rgb:0,0,0; --glow-ok-rgb:20,140,40; --glow-red-rgb:180,30,30;
   --pending-bg:#eeeeee;
   --donut-empty:#dddddd;
@@ -58,8 +58,16 @@ body.light {
 body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monospace;height:100vh;display:flex;overflow:hidden;}
 
 /* ── Sidebar ── */
-#sidebar{width:180px;min-width:180px;background:var(--panel);border-right:1px solid var(--border-dim);display:flex;flex-direction:column;padding:24px 16px;gap:12px;}
-.sidebar-logo{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--border);letter-spacing:3px;padding-bottom:20px;border-bottom:1px solid var(--border-dim);margin-bottom:8px;line-height:1.6;}
+#sidebar{width:180px;min-width:180px;background:var(--panel);border-right:1px solid var(--border-dim);display:flex;flex-direction:column;padding:24px 16px;gap:12px;transition:width .25s ease,min-width .25s ease,padding .25s ease;}
+#sidebar.collapsed{width:52px;min-width:52px;padding:16px 8px;}
+#sidebar.collapsed .sidebar-logo{opacity:0;height:0;padding:0;margin:0;border:none;overflow:hidden;}
+#sidebar.collapsed .nav-btn-label{display:none;}
+#sidebar.collapsed .nav-btn{padding:12px;text-align:center;justify-content:center;}
+#sidebar.collapsed .theme-toggle{padding:10px 6px;}
+#sidebar.collapsed .theme-label{display:none;}
+.nav-btn{display:flex;align-items:center;gap:10px;}
+.nav-btn-icon{font-size:.9rem;flex-shrink:0;}
+.sidebar-logo{font-family:'Orbitron',sans-serif;font-size:.7rem;color:var(--border);letter-spacing:3px;padding-bottom:20px;border-bottom:1px solid var(--border-dim);margin-bottom:8px;line-height:1.6;transition:opacity .2s,height .25s;overflow:hidden;}
 .nav-btn{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.7rem;letter-spacing:2px;padding:12px 16px;cursor:pointer;text-align:left;transition:all .2s;text-transform:uppercase;}
 .nav-btn:hover,.nav-btn.active{border-color:var(--border);color:var(--border);background:rgba(var(--glow-rgb),.05);box-shadow:0 0 14px rgba(var(--glow-rgb),.3),0 0 4px rgba(var(--glow-rgb),.1);}
 
@@ -117,7 +125,7 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 .btn-dim{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:8px 16px;cursor:pointer;transition:all .2s;}
 .btn-dim:hover{border-color:#666;color:#999;}
 .btn-red{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px 14px;cursor:pointer;transition:all .2s;}
-.btn-red:hover{border-color:#aa3333;color:#cc4444;background:rgba(160,40,40,.08);}
+.btn-red:hover{border-color:#aa3333;color:#cc4444;background:rgba(160,40,40,.08);box-shadow:0 0 14px rgba(var(--glow-ok-rgb),.4),0 0 4px rgba(var(--glow-ok-rgb),.2);}
 .btn-save{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px 14px;cursor:pointer;transition:all .2s;}
 .btn-save:hover{border-color:#3a9a3a;color:#5dcc5d;background:rgba(40,140,40,.08);box-shadow:0 0 14px rgba(var(--glow-ok-rgb),.4),0 0 4px rgba(var(--glow-ok-rgb),.2);}
 .btn-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
@@ -204,7 +212,7 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 .lib-card-name{font-family:'Orbitron',sans-serif;font-size:.75rem;letter-spacing:2px;color:var(--border);}
 .lib-card-range{font-size:.72rem;color:var(--text-dim);line-height:1.9;}
 .lib-card-del{background:transparent;border:1px solid #3a1a1a;color:#884444;font-family:'Orbitron',sans-serif;font-size:.6rem;letter-spacing:2px;padding:6px;cursor:pointer;transition:all .2s;}
-.lib-card-del:hover{border-color:var(--alert-t);color:var(--alert-t);box-shadow:0 0 10px rgba(255,80,80,.2);}
+.lib-card-del:hover{background:var(--alert);border-color:var(--alert-t);color:var(--alert-t);box-shadow:0 0 10px rgba(255,80,80,.2);}
 
 /* ── New preset form ── */
 #new-preset-form{display:none;background:var(--panel);border:1px solid var(--border);padding:22px;margin-bottom:8px;}
@@ -222,6 +230,10 @@ body{background:var(--bg);color:var(--text);font-family:'Share Tech Mono',monosp
 .theme-toggle{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);
   font-size:1rem;padding:10px;cursor:pointer;transition:all .2s;width:100%;text-align:center;}
 .theme-toggle:hover{border-color:var(--border);color:var(--border);
+  box-shadow:0 0 12px rgba(var(--glow-rgb),.3);}
+.collapse-btn{background:transparent;border:1px solid var(--border-dim);color:var(--text-dim);
+  font-size:.85rem;padding:8px;cursor:pointer;transition:all .2s;width:100%;text-align:center;letter-spacing:1px;}
+.collapse-btn:hover{border-color:var(--border);color:var(--border);
   box-shadow:0 0 12px rgba(var(--glow-rgb),.3);}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--scrollbar);}
@@ -349,13 +361,26 @@ select:hover {
 <body>
 
 <div id="sidebar">
+  <button class="collapse-btn" id="collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar">
+    <span id="collapse-icon">◀</span>
+  </button>
   <div class="sidebar-logo">Fish<br>Farm<br>Monitor</div>
-  <button class="nav-btn active" onclick="showPage('farms',this)">Farms</button>
-  <button class="nav-btn" onclick="showPage('history',this)">History</button>
-  <button class="nav-btn" onclick="showPage('preset',this)">Presets</button>
+  <button class="nav-btn active" onclick="showPage('farms',this)">
+    <span class="nav-btn-icon">🐟</span>
+    <span class="nav-btn-label">Farms</span>
+  </button>
+  <button class="nav-btn" onclick="showPage('history',this)">
+    <span class="nav-btn-icon">📋</span>
+    <span class="nav-btn-label">History</span>
+  </button>
+  <button class="nav-btn" onclick="showPage('preset',this)">
+    <span class="nav-btn-icon">⚙</span>
+    <span class="nav-btn-label">Presets</span>
+  </button>
   <div style="flex:1;"></div>
   <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode">
     <span id="theme-icon">☀</span>
+    <span class="theme-label" style="font-size:.6rem;letter-spacing:1px;font-family:'Orbitron',sans-serif;margin-left:4px;">MODE</span>
   </button>
 </div>
 
@@ -977,6 +1002,20 @@ function deletePreset(id) {
       if (d.status==='ok') { localPresets=localPresets.filter(p=>p.id!=id); renderPresetLib(); }
       else alert('Delete failed: '+d.message);
     });
+}
+
+// ── Sidebar collapse ─────────────────────────────────────
+function toggleSidebar() {
+  const sb   = document.getElementById('sidebar');
+  const icon = document.getElementById('collapse-icon');
+  const collapsed = sb.classList.toggle('collapsed');
+  icon.textContent = collapsed ? '▶' : '◀';
+  localStorage.setItem('sidebar', collapsed ? 'collapsed' : 'open');
+}
+// Restore sidebar state
+if (localStorage.getItem('sidebar') === 'collapsed') {
+  document.getElementById('sidebar').classList.add('collapsed');
+  document.getElementById('collapse-icon').textContent = '▶';
 }
 
 // ── Theme ────────────────────────────────────────────────
