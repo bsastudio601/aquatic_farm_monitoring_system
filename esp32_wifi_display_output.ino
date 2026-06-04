@@ -7,36 +7,50 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-#define TFT_CS   5
-#define TFT_DC   17
-#define TFT_RST  16
+// ===== TFT =====
+#define TFT_CS  5
+#define TFT_DC  17
+#define TFT_RST 16
 
-#define TRIG 25
-#define ECHO 26
+// ===== Sensors =====
+#define TRIG         25
+#define ECHO         26
 #define ONE_WIRE_BUS 13
-#define WATER_SIG 32
+#define WATER_SIG    32
+#define LED_PIN      27
 
 #define TANK_HEIGHT 100
 
+// ===== WiFi =====
 const char* ssids[]     = {"realme_C11", "Arthi", "realme_C12"};
 const char* passwords[] = {"artthhii", "01707275528", "aabbcc112233"};
 
+// ===== Server =====
 const char* SERVER_NAME = "http://aquaticfarm.atwebpages.com/sensordata.php";
 String PROJECT_API_KEY  = "iloveher143";
 int station_id          = 2;
 
-float a_ph    = 7.00;
-float a_temp  = 25.00;
-float a_level = 80.00;
+// ===== Setpoints (start at 0) =====
+float a_ph    = 0;
+float a_temp  = 0;
+float a_level = 0;
 
-unsigned long lastMillis = 0;
-const long interval      = 5000;
+// ===== Last known readings (start at 0) =====
+float currentPH    = 0;
+float currentTemp  = 0;
+float currentLevel = 0;
+
+// ===== Timers =====
+unsigned long lastSensor  = 0;
+unsigned long lastUpload  = 0;
+unsigned long lastDisplay = 0;
+
+// ===== Baseline for pH =====
+int baseline = 0;
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
-
-int baseline = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -44,12 +58,14 @@ void setup() {
 
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
 
-  // Calibration
+  // Calibration screen
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(2);
   tft.setCursor(10, 20);
@@ -66,17 +82,23 @@ void setup() {
     delay(100);
   }
   baseline = sum / 10;
+  Serial.printf("[Cal] Baseline: %d\n", baseline);
 
   tft.fillScreen(ST77XX_BLACK);
   tft.setTextColor(ST77XX_GREEN);
   tft.setCursor(10, 40);
   tft.println("Calibrated!");
-  delay(1000);
+  tft.setCursor(10, 60);
+  tft.print("Base: ");
+  tft.println(baseline);
+  delay(1500);
 
-  // WiFi
+  // WiFi screen
   tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
   tft.setCursor(10, 40);
   tft.println("Connecting");
+  tft.setCursor(10, 60);
   tft.println("WiFi...");
   connectToWiFi();
 
@@ -84,72 +106,99 @@ void setup() {
 }
 
 void loop() {
-  // === Ultrasonic ===
-  digitalWrite(TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
+  unsigned long now = millis();
 
-  long duration = pulseIn(ECHO, HIGH);
-  float distance = duration * 0.034 / 2;
-  int percent = constrain(map(distance, TANK_HEIGHT, 0, 0, 100), 0, 100);
+  // ===== Read sensors every 5s =====
+  if (now - lastSensor > 5000) {
+    lastSensor = now;
 
-  // === Temp ===
-  sensors.requestTemperatures();
-  float tempC = sensors.getTempCByIndex(0);
+    // Ultrasonic
+    delay(10);
+    digitalWrite(TRIG, LOW);
+    delayMicroseconds(2);
+    digitalWrite(TRIG, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG, LOW);
+    long duration = pulseIn(ECHO, HIGH, 30000);
+    if (duration > 0) {
+      float distance = duration * 0.034 / 2;
+      currentLevel = constrain(map(distance, TANK_HEIGHT, 0, 0, 100), 0, 100);
+    }
 
-  // === est. pH ===
-  int raw = analogRead(WATER_SIG);
-  int diff = raw - baseline;
-  float pH = 7.0 - map(diff, -500, 500, -20, 20) / 10.0;
-  pH = constrain(pH, 5.0, 9.0);
+    // Temp (offset 500ms)
+    delay(500);
+    sensors.requestTemperatures();
+    float t = sensors.getTempCByIndex(0);
+    if (t != -127.0) currentTemp = t;
 
-  // === Upload every 5s ===
-  if (millis() - lastMillis > interval) {
+    // pH (offset 500ms)
+    delay(500);
+    int raw = analogRead(WATER_SIG);
+    if (raw > 0) {
+      int diff = raw - baseline;
+      float pH = 7.0 - map(diff, -500, 500, -20, 20) / 10.0;
+      currentPH = constrain(pH, 5.0, 9.0);
+    }
+
+    // LED — on if water level exceeds setpoint
+    digitalWrite(LED_PIN, (a_level > 0 && currentLevel > a_level) ? HIGH : LOW);
+
+    Serial.printf("[Sensor] Level:%.1f%% Temp:%.1fC pH:%.2f\n",
+                  currentLevel, currentTemp, currentPH);
+  }
+
+  // ===== Upload every 5s offset 2s from sensor =====
+  if (now - lastUpload > 5000 && now - lastSensor > 2000) {
+    lastUpload = now;
     if (WiFi.status() == WL_CONNECTED) {
-      uploadData(pH, tempC, percent);
+      uploadData(currentPH, currentTemp, currentLevel);
     } else {
       connectToWiFi();
     }
-    lastMillis = millis();
   }
 
-  // === TFT ===
-  tft.fillScreen(ST77XX_BLACK);
+  // ===== Display every 5s offset 1s from sensor =====
+  if (now - lastDisplay > 5000 && now - lastSensor > 1000) {
+    lastDisplay = now;
 
-  tft.setTextColor(ST77XX_CYAN);
-  tft.setTextSize(2);
-  tft.setCursor(10, 5);
-  tft.print("Water:");
-  tft.setTextColor(ST77XX_GREEN);
-  tft.setCursor(90, 5);
-  tft.print(percent);
-  tft.print("%");
+    tft.fillScreen(ST77XX_BLACK);
 
-  tft.setTextColor(ST77XX_YELLOW);
-  tft.setCursor(10, 35);
-  tft.print("Temp:");
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setCursor(90, 35);
-  tft.print(tempC, 1);
-  tft.print("C");
+    // Water level
+    tft.setTextColor(ST77XX_CYAN);
+    tft.setTextSize(2);
+    tft.setCursor(10, 5);
+    tft.print("Water:");
+    tft.setTextColor(ST77XX_GREEN);
+    tft.setCursor(90, 5);
+    tft.print((int)currentLevel);
+    tft.print("%");
 
-  tft.setTextColor(ST77XX_MAGENTA);
-  tft.setCursor(10, 65);
-  tft.print("est.pH:");
-  tft.setTextColor(ST77XX_WHITE);
-  tft.setTextSize(3);
-  tft.setCursor(10, 90);
-  tft.print(pH, 1);
+    // Temp
+    tft.setTextColor(ST77XX_YELLOW);
+    tft.setCursor(10, 35);
+    tft.print("Temp:");
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setCursor(90, 35);
+    tft.print(currentTemp, 1);
+    tft.print("C");
 
-  // WiFi status dot
-  tft.setTextSize(1);
-  tft.setTextColor(WiFi.status() == WL_CONNECTED ? ST77XX_GREEN : ST77XX_RED);
-  tft.setCursor(140, 5);
-  tft.print(WiFi.status() == WL_CONNECTED ? "W" : "X");
+    // pH
+    tft.setTextColor(ST77XX_MAGENTA);
+    tft.setCursor(10, 65);
+    tft.print("est.pH:");
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(3);
+    tft.setCursor(10, 90);
+    tft.print(currentPH, 1);
 
-  delay(500);
+    // WiFi indicator
+    tft.setTextSize(1);
+    tft.setTextColor(WiFi.status() == WL_CONNECTED ? ST77XX_GREEN : ST77XX_RED);
+    tft.setCursor(140, 5);
+    tft.print(WiFi.status() == WL_CONNECTED ? "W" : "X");
+  }
+
+  delay(100);
 }
 
 void uploadData(float ph, float temp, float level) {
@@ -163,7 +212,6 @@ void uploadData(float ph, float temp, float level) {
   http.begin(SERVER_NAME);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   int httpCode = http.POST(postData);
-
   Serial.printf("[HTTP] Code: %d\n", httpCode);
 
   if (httpCode == 200) {
@@ -191,17 +239,23 @@ void connectToWiFi() {
   int numNetworks = sizeof(ssids) / sizeof(ssids[0]);
   for (int i = 0; i < numNetworks; i++) {
     Serial.printf("[WiFi] Trying: %s\n", ssids[i]);
+    WiFi.disconnect();
+    delay(500);
     WiFi.begin(ssids[i], passwords[i]);
+
     int attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    while (WiFi.status() != WL_CONNECTED && attempts < 30) {
       delay(500);
       Serial.print(".");
       attempts++;
     }
+    Serial.println();
+
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+      Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
       return;
     }
+    Serial.printf("[WiFi] Failed: %s\n", ssids[i]);
   }
-  Serial.println("\n[WiFi] All networks failed.");
+  Serial.println("[WiFi] All networks failed.");
 }
