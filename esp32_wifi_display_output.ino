@@ -35,6 +35,11 @@ float a_ph    = 0;
 float a_temp  = 0;
 float a_level = 0;
 
+// ===== Ranges from server =====
+float ph_min    = 0; float ph_max    = 0;
+float temp_min  = 0; float temp_max  = 0;
+float level_min = 0; float level_max = 0;
+
 // ===== Last known readings (start at 0) =====
 float currentPH    = 0;
 float currentTemp  = 0;
@@ -44,6 +49,8 @@ float currentLevel = 0;
 unsigned long lastSensor  = 0;
 unsigned long lastUpload  = 0;
 unsigned long lastDisplay = 0;
+
+bool firstReadDone = false;
 
 // ===== Baseline for pH =====
 int baseline = 0;
@@ -65,7 +72,7 @@ void setup() {
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
 
-  // Calibration screen
+  // Calibration
   tft.setTextColor(ST77XX_WHITE);
   tft.setTextSize(2);
   tft.setCursor(10, 20);
@@ -93,7 +100,7 @@ void setup() {
   tft.println(baseline);
   delay(1500);
 
-  // WiFi screen
+  // WiFi
   tft.fillScreen(ST77XX_BLACK);
   tft.setTextColor(ST77XX_WHITE);
   tft.setCursor(10, 40);
@@ -140,15 +147,17 @@ void loop() {
       currentPH = constrain(pH, 5.0, 9.0);
     }
 
-    // LED — on if water level exceeds setpoint
-    digitalWrite(LED_PIN, (a_level > 0 && currentLevel > a_level) ? HIGH : LOW);
+    firstReadDone = true;
+
+    // LED — on if level exceeds level_max from server
+    digitalWrite(LED_PIN, (level_max > 0 && currentLevel > level_max) ? HIGH : LOW);
 
     Serial.printf("[Sensor] Level:%.1f%% Temp:%.1fC pH:%.2f\n",
                   currentLevel, currentTemp, currentPH);
   }
 
   // ===== Upload every 5s offset 2s from sensor =====
-  if (now - lastUpload > 5000 && now - lastSensor > 2000) {
+  if (firstReadDone && now - lastUpload > 5000 && now - lastSensor > 2000) {
     lastUpload = now;
     if (WiFi.status() == WL_CONNECTED) {
       uploadData(currentPH, currentTemp, currentLevel);
@@ -223,7 +232,7 @@ void uploadData(float ph, float temp, float level) {
 }
 
 void parseSetpoints(String json) {
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<512> doc;
   DeserializationError err = deserializeJson(doc, json);
   if (err) return;
 
@@ -231,7 +240,18 @@ void parseSetpoints(String json) {
     a_ph    = doc["a_ph"]    | a_ph;
     a_temp  = doc["a_temp"]  | a_temp;
     a_level = doc["a_level"] | a_level;
-    Serial.printf("[Setpts] pH:%.2f Temp:%.2f Level:%.2f\n", a_ph, a_temp, a_level);
+
+    ph_min    = doc["ph_min"]    | ph_min;
+    ph_max    = doc["ph_max"]    | ph_max;
+    temp_min  = doc["temp_min"]  | temp_min;
+    temp_max  = doc["temp_max"]  | temp_max;
+    level_min = doc["level_min"] | level_min;
+    level_max = doc["level_max"] | level_max;
+
+    Serial.printf("[Setpts] a_ph:%.2f a_temp:%.2f a_level:%.2f\n",
+                  a_ph, a_temp, a_level);
+    Serial.printf("[Ranges] pH:%.2f-%.2f Temp:%.2f-%.2f Level:%.2f-%.2f\n",
+                  ph_min, ph_max, temp_min, temp_max, level_min, level_max);
   }
 }
 
