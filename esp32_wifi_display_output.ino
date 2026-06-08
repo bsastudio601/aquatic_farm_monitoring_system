@@ -16,7 +16,7 @@
 #define TRIG         25
 #define ECHO         26
 #define ONE_WIRE_BUS 13
-#define WATER_SIG    32
+#define WATER_SIG    33
 #define LED_PIN      27
 
 #define TANK_HEIGHT 100
