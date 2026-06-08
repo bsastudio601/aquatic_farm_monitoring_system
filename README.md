@@ -13,6 +13,7 @@ esp32_only_display.ino is a test code DO NOT USE IT
 | G5 | CS |
 | G17 | D/C |
 | G23 | DIN |
+| G18 | CLK |
 | 3.3V | VCC |
 | 3.3V | BL |
 | GND | GND |
