@@ -43,7 +43,7 @@ esp32_only_display.ino is a test code DO NOT USE IT
 |-----------|-----------------|
 | 3.3V | + |
 | GND | - |
-| G32 | S (Signal) |    needs to be changed to 33 
+| G33 | S (Signal) | 
 
 ## Water Overflow Protection
 
