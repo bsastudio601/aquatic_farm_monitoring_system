@@ -17,17 +17,17 @@
 #define ECHO         26
 #define ONE_WIRE_BUS 13
 #define WATER_SIG    33
-#define LED_PIN      27
+#define LED_PIN      14
 
-#define TANK_HEIGHT 100
+#define TANK_HEIGHT 11                             // Really adjust this
 
 // ===== WiFi =====
-const char* ssids[]     = {"realme_C11", "Arthi", "realme_C12"};
-const char* passwords[] = {"artthhii", "01707275528", "aabbcc112233"};
+const char* ssids[]     = {"Monali", "NABOLOK GCF RHL", "realme_C12"};
+const char* passwords[] = {"dev@1986", "GCFRHL#25", "aabbcc112233"};
 
 // ===== Server =====
 const char* SERVER_NAME = "http://aquaticfarm.atwebpages.com/sensordata.php";
-String PROJECT_API_KEY  = "API KEY HERE";
+String PROJECT_API_KEY  = "iloveher143";
 int station_id          = 2;
 
 // ===== Setpoints (start at 0) =====
@@ -66,7 +66,7 @@ void setup() {
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  digitalWrite(LED_PIN, HIGH);
 
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);
@@ -150,7 +150,7 @@ void loop() {
     firstReadDone = true;
 
     // LED — on if level exceeds level_max from server
-    digitalWrite(LED_PIN, (level_max > 0 && currentLevel > level_max) ? HIGH : LOW);
+    digitalWrite(LED_PIN, (level_max > 0 && currentLevel > level_max) ? LOW : HIGH);
 
     Serial.printf("[Sensor] Level:%.1f%% Temp:%.1fC pH:%.2f\n",
                   currentLevel, currentTemp, currentPH);
@@ -193,11 +193,11 @@ void loop() {
 
     // pH
     tft.setTextColor(ST77XX_MAGENTA);
+    tft.setTextSize(2);
     tft.setCursor(10, 65);
     tft.print("est.pH:");
     tft.setTextColor(ST77XX_WHITE);
-    tft.setTextSize(3);
-    tft.setCursor(10, 90);
+    tft.setCursor(90, 65);
     tft.print(currentPH, 1);
 
     // WiFi indicator
