@@ -3,7 +3,7 @@ include_once('config.php');
 
 header('Content-Type: application/json');
 
-$correct_api_key = "iloveher143";
+$correct_api_key = "API KEY HERE";
 
 // --- Validate required fields ---
 $required = ['api_key', 'station_id', 'ph', 'temp', 'level'];
