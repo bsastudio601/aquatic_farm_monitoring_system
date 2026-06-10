@@ -27,7 +27,7 @@ const char* passwords[] = {"artthhii", "01707275528", "aabbcc112233"};
 
 // ===== Server =====
 const char* SERVER_NAME = "http://aquaticfarm.atwebpages.com/sensordata.php";
-String PROJECT_API_KEY  = "iloveher143";
+String PROJECT_API_KEY  = "API KEY HERE";
 int station_id          = 2;
 
 // ===== Setpoints (start at 0) =====
