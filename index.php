@@ -576,7 +576,23 @@ select:hover {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.botpress.cloud/webchat/v3.2/inject.js"></script>
 <script>
+const savedTheme = localStorage.getItem('theme');    
+
+        window.botpress.init({
+                botId: "bp_bak_PR8LThSMrf4JjaBXiolsW7s91FvsBCnhPLqF",
+            clientId: "a5413842-3247-49ee-a85d-cc6c0ee04000",
+            configuration: {
+                botName: "Fish Doctor",
+                themeMode: savedTheme === 'light'
+                    ? 'light'
+                    :'dark' ,
+                color: "#c8a84b"
+            }
+        });
+        
+    
 const stations     = <?php echo json_encode($stations); ?>;
 const stationNames = <?php echo json_encode($station_names); ?>; // station_id => name
 const charts    = {};
@@ -1024,21 +1040,30 @@ if (localStorage.getItem('sidebar') === 'collapsed') {
 // ── Theme ────────────────────────────────────────────────
 function toggleTheme() {
   const isLight = document.body.classList.toggle('light');
-  document.getElementById('theme-icon').textContent = isLight ? '🌙' : '☀';
-  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+
+  document.getElementById('theme-icon').textContent =
+      isLight ? '🌙' : '☀';
+
+  localStorage.setItem('theme',
+      isLight ? 'light' : 'dark');
+
   // Rebuild donuts so empty color updates
   stations.forEach(sid => {
-    if (charts[sid]) { charts[sid].destroy(); delete charts[sid]; }
+    if (charts[sid]) {
+      charts[sid].destroy();
+      delete charts[sid];
+    }
     initDonut(sid);
   });
+
   pollAll();
 }
+
 // Apply saved theme on load
 if (localStorage.getItem('theme') === 'light') {
   document.body.classList.add('light');
   document.getElementById('theme-icon').textContent = '🌙';
 }
-
 // ── Boot ─────────────────────────────────────────────────
 stations.forEach(sid=>initDonut(sid));
 renderPresetLib();
